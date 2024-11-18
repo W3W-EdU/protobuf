@@ -17,7 +17,7 @@
 //        PyProtoAPICapsuleName(), 0));
 //    if (!py_proto_api) { ...handle ImportError... }
 // Then use the methods of the returned class:
-//    py_proto_api->GetMessagePointer(...);
+//    py_proto_api->GetConstMessagePointer(...);
 
 #ifndef GOOGLE_PROTOBUF_PYTHON_PROTO_API_H__
 #define GOOGLE_PROTOBUF_PYTHON_PROTO_API_H__
@@ -36,6 +36,7 @@ namespace protobuf {
 namespace python {
 
 class PythonMessageMutator;
+class PythonConstMessagePointer;
 
 // Note on the implementation:
 // This API is designed after
@@ -63,8 +64,14 @@ struct PyProto_API {
   virtual absl::StatusOr<PythonMessageMutator> GetClearedMessageMutator(
       PyObject* msg) const = 0;
 
+  virtual absl::StatusOr<PythonConstMessagePointer> GetConstMessagePointer(
+      PyObject* msg) const = 0;
+
   // If the passed object is a Python Message, returns its internal pointer.
   // Otherwise, returns NULL with an exception set.
+  [[deprecated(
+      "GetMessagePointer() only work with Cpp Extension, "
+      "please migrate to GetConstMessagePointer().")]]
   virtual const Message* GetMessagePointer(PyObject* msg) const = 0;
 
   // If the passed object is a Python Message, returns a mutable pointer.
@@ -133,11 +140,15 @@ struct PyProto_API {
   PythonMessageMutator CreatePythonMessageMutator(Message* owned_msg,
                                                   Message* msg,
                                                   PyObject* py_msg) const;
+  PythonConstMessagePointer CreatePythonConstMessagePointer(
+      Message* owned_msg, const Message* msg, PyObject* py_msg) const;
 };
 
 // User should not hold onto this object while calling back into Python
 class PythonMessageMutator {
  public:
+  PythonMessageMutator()
+      : owned_msg_(nullptr), message_(nullptr), py_msg_(nullptr) {}
   PythonMessageMutator(PythonMessageMutator&& other);
   ~PythonMessageMutator();
 
@@ -158,6 +169,25 @@ class PythonMessageMutator {
   Message* message_;
   // py_msg_ points to the python message. message_ content will be serialized
   // to py_msg_ at destructor for UPB/Pure Python, CPP Extension won't.
+  PyObject* py_msg_;
+};
+
+class PythonConstMessagePointer {
+ public:
+  PythonConstMessagePointer()
+      : owned_msg_(nullptr), message_(nullptr), py_msg_(nullptr) {}
+  PythonConstMessagePointer(PythonConstMessagePointer&& other);
+  ~PythonConstMessagePointer();
+
+  const Message* get() { return message_; }
+
+ private:
+  friend struct google::protobuf::python::PyProto_API;
+  PythonConstMessagePointer(Message* owned_msg, const Message* message,
+                            PyObject* py_msg);
+
+  std::unique_ptr<Message> owned_msg_;
+  const Message* message_;
   PyObject* py_msg_;
 };
 

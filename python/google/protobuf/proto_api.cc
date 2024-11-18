@@ -1,5 +1,7 @@
 #include "google/protobuf/proto_api.h"
 
+#include <Python.h>
+
 #include <string>
 
 #include "absl/log/absl_check.h"
@@ -50,6 +52,37 @@ PythonMessageMutator::~PythonMessageMutator() {
 PythonMessageMutator PyProto_API::CreatePythonMessageMutator(
     Message* owned_msg, Message* msg, PyObject* py_msg) const {
   return PythonMessageMutator(owned_msg, msg, py_msg);
+}
+
+PythonConstMessagePointer::PythonConstMessagePointer(Message* owned_msg,
+                                                     const Message* message,
+                                                     PyObject* py_msg)
+    : owned_msg_(owned_msg), message_(message), py_msg_(py_msg) {
+  ABSL_DCHECK(py_msg != nullptr);
+  ABSL_DCHECK(message != nullptr);
+  Py_INCREF(py_msg_);
+}
+
+PythonConstMessagePointer::PythonConstMessagePointer(
+    PythonConstMessagePointer&& other)
+    : owned_msg_(other.owned_msg_ == nullptr ? nullptr
+                                             : other.owned_msg_.release()),
+      message_(other.message_),
+      py_msg_(other.py_msg_) {
+  other.message_ = nullptr;
+  other.py_msg_ = nullptr;
+}
+
+PythonConstMessagePointer::~PythonConstMessagePointer() {
+  if (py_msg_ == nullptr) {
+    return;
+  }
+  Py_DECREF(py_msg_);
+}
+
+PythonConstMessagePointer PyProto_API::CreatePythonConstMessagePointer(
+    Message* owned_msg, const Message* msg, PyObject* py_msg) const {
+  return PythonConstMessagePointer(owned_msg, msg, py_msg);
 }
 
 }  // namespace python
