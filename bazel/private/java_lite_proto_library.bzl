@@ -68,7 +68,7 @@ def _aspect_impl(target, ctx):
         JavaProtoAspectInfo(jars = depset(jars, transitive = transitive_jars)),
     ]
 
-_java_lite_proto_aspect = aspect(
+java_lite_proto_aspect = aspect(
     implementation = _aspect_impl,
     attr_aspects = ["deps", "exports"],
     attrs = toolchains.if_legacy_toolchain({
@@ -164,7 +164,7 @@ proto_library(
 </pre>
 """,
     attrs = {
-        "deps": attr.label_list(providers = [ProtoInfo], aspects = [_java_lite_proto_aspect], doc = """
+        "deps": attr.label_list(providers = [ProtoInfo], aspects = [java_lite_proto_aspect], doc = """
 The list of <a href="protocol-buffer.html#proto_library"><code>proto_library</code></a>
 rules to generate Java code for.
 """),
