@@ -284,34 +284,8 @@ struct NodeBase {
   }
 };
 
-// This captures all numeric types.
-inline size_t MapValueSpaceUsedExcludingSelfLong(bool) { return 0; }
-inline size_t MapValueSpaceUsedExcludingSelfLong(const std::string& str) {
-  return StringSpaceUsedExcludingSelfLong(str);
-}
-template <typename T,
-          typename = decltype(std::declval<const T&>().SpaceUsedLong())>
-size_t MapValueSpaceUsedExcludingSelfLong(const T& message) {
-  return message.SpaceUsedLong() - sizeof(T);
-}
-
 constexpr size_t kGlobalEmptyTableSize = 1;
 PROTOBUF_EXPORT extern NodeBase* const kGlobalEmptyTable[kGlobalEmptyTableSize];
-
-template <typename Map,
-          typename = typename std::enable_if<
-              !std::is_scalar<typename Map::key_type>::value ||
-              !std::is_scalar<typename Map::mapped_type>::value>::type>
-size_t SpaceUsedInValues(const Map* map) {
-  size_t size = 0;
-  for (const auto& v : *map) {
-    size += internal::MapValueSpaceUsedExcludingSelfLong(v.first) +
-            internal::MapValueSpaceUsedExcludingSelfLong(v.second);
-  }
-  return size;
-}
-
-inline size_t SpaceUsedInValues(const void*) { return 0; }
 
 class UntypedMapBase;
 
@@ -457,6 +431,9 @@ class PROTOBUF_EXPORT UntypedMapBase {
   UntypedMapBase(const UntypedMapBase&) = delete;
   UntypedMapBase& operator=(const UntypedMapBase&) = delete;
 
+  // Space used for the table and nodes.
+  size_t SpaceUsedExcludingSelfLong() const;
+
  protected:
   // 16 bytes is the minimum useful size for the array cache in the arena.
   enum : map_index_t { kMinTableSize = 16 / sizeof(void*) };
@@ -483,6 +460,17 @@ class PROTOBUF_EXPORT UntypedMapBase {
   // We make this a static function to reduce the cost in MapField.
   // All the end iterators are singletons anyway.
   static UntypedMapIterator EndIterator() { return {nullptr, nullptr, 0}; }
+
+  // Calls `f(k)` with the key of the node, where `k` is the appropriate type
+  // according to the stored TypeInfo.
+  template <typename F>
+  auto VisitKey(NodeBase* node, F f) const;
+
+  // Calls `f(v)` with the value of the node, where `v` is the appropriate type
+  // according to the stored TypeInfo.
+  // Messages are visited as `MessageLite`, and enums are visited as int32.
+  template <typename F>
+  auto VisitValue(NodeBase* node, F f) const;
 
  protected:
   friend class TcParser;
@@ -555,6 +543,12 @@ class PROTOBUF_EXPORT UntypedMapBase {
     return result;
   }
 
+  template <typename T = void>
+  T* GetValue(NodeBase* node) const {
+    return reinterpret_cast<T*>(reinterpret_cast<char*>(node) +
+                                type_info_.value_offset);
+  }
+
   enum {
     kKeyIsString = 1 << 0,
     kValueIsString = 1 << 1,
@@ -605,10 +599,6 @@ class PROTOBUF_EXPORT UntypedMapBase {
 
   void ClearTable(ClearInput input);
 
-  // Space used for the table, trees, and nodes.
-  // Does not include the indirect space used. Eg the data of a std::string.
-  size_t SpaceUsedInTable(size_t sizeof_node) const;
-
   map_index_t num_elements_;
   map_index_t num_buckets_;
   map_index_t index_of_first_non_null_;
@@ -616,6 +606,44 @@ class PROTOBUF_EXPORT UntypedMapBase {
   NodeBase** table_;  // an array with num_buckets_ entries
   Allocator alloc_;
 };
+
+template <typename F>
+auto UntypedMapBase::VisitKey(NodeBase* node, F f) const {
+  switch (type_info_.key_type) {
+    case TypeKind::kBool:
+      return f(static_cast<bool*>(node->GetVoidKey()));
+    case TypeKind::kU32:
+      return f(static_cast<uint32_t*>(node->GetVoidKey()));
+    case TypeKind::kU64:
+      return f(static_cast<uint64_t*>(node->GetVoidKey()));
+    case TypeKind::kString:
+      return f(static_cast<std::string*>(node->GetVoidKey()));
+    default:
+      Unreachable();
+  }
+}
+
+template <typename F>
+auto UntypedMapBase::VisitValue(NodeBase* node, F f) const {
+  switch (type_info_.value_type) {
+    case TypeKind::kBool:
+      return f(GetValue<bool>(node));
+    case TypeKind::kU32:
+      return f(GetValue<uint32_t>(node));
+    case TypeKind::kU64:
+      return f(GetValue<uint64_t>(node));
+    case TypeKind::kFloat:
+      return f(GetValue<float>(node));
+    case TypeKind::kDouble:
+      return f(GetValue<double>(node));
+    case TypeKind::kString:
+      return f(GetValue<std::string>(node));
+    case TypeKind::kMessage:
+      return f(GetValue<MessageLite>(node));
+    case TypeKind::kUnknown:
+      Unreachable();
+  }
+}
 
 inline UntypedMapIterator UntypedMapBase::begin() const {
   map_index_t bucket_index;
@@ -1425,7 +1453,7 @@ class Map : private internal::KeyMapBase<internal::KeyForBase<Key>> {
 
   size_t SpaceUsedExcludingSelfLong() const {
     if (empty()) return 0;
-    return SpaceUsedInternal() + internal::SpaceUsedInValues(this);
+    return internal::UntypedMapBase::SpaceUsedExcludingSelfLong();
   }
 
   static constexpr size_t InternalGetArenaOffset(internal::InternalVisibility) {
@@ -1459,10 +1487,6 @@ class Map : private internal::KeyMapBase<internal::KeyForBase<Key>> {
       node->kv.second.~mapped_type();
       this->DeallocNode(node, sizeof(Node));
     }
-  }
-
-  size_t SpaceUsedInternal() const {
-    return this->SpaceUsedInTable(sizeof(Node));
   }
 
   template <typename K, typename... Args>

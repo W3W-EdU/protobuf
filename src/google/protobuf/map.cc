@@ -14,6 +14,7 @@
 #include <string>
 
 #include "absl/base/optimization.h"
+#include "absl/functional/overload.h"
 #include "absl/log/absl_check.h"
 #include "google/protobuf/arena.h"
 #include "google/protobuf/message_lite.h"
@@ -96,12 +97,25 @@ void UntypedMapBase::ClearTable(const ClearInput input) {
   }
 }
 
-size_t UntypedMapBase::SpaceUsedInTable(size_t sizeof_node) const {
+size_t UntypedMapBase::SpaceUsedExcludingSelfLong() const {
   size_t size = 0;
   // The size of the table.
   size += sizeof(void*) * num_buckets_;
   // All the nodes.
-  size += sizeof_node * num_elements_;
+  size += type_info_.node_size * num_elements_;
+  for (auto it = begin(); !it.Equals(EndIterator()); it.PlusPlus()) {
+    const auto space_used = absl::Overload{
+        [](std::string* str) { return StringSpaceUsedExcludingSelfLong(*str); },
+        [&](MessageLite* msg) -> size_t {
+          auto* class_data = GetClassData(*msg);
+          if (class_data->is_lite) return 0;
+          return class_data->full().descriptor_methods->space_used_long(*msg) -
+                 (type_info_.node_size - type_info_.value_offset);
+        },
+        [](void*) -> size_t { return 0; }};
+    size += VisitKey(it.node_, space_used);
+    size += VisitValue(it.node_, space_used);
+  }
   return size;
 }
 
