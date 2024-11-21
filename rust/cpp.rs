@@ -1017,9 +1017,9 @@ where
 
     fn to_view<'a>(key: Self::FfiKey) -> View<'a, Self>;
 
-    unsafe fn free(m: RawMap, prototype: MapValue);
+    unsafe fn free(m: RawMap);
 
-    unsafe fn clear(m: RawMap, prototype: MapValue);
+    unsafe fn clear(m: RawMap);
 
     unsafe fn insert(m: RawMap, key: View<'_, Self>, value: MapValue) -> bool;
 
@@ -1053,13 +1053,13 @@ macro_rules! generate_map_key_impl {
             }
 
             #[inline]
-            unsafe fn free(m: RawMap, prototype: MapValue) {
-                unsafe { [< proto2_rust_map_free_ $key >](m, prototype) }
+            unsafe fn free(m: RawMap) {
+                unsafe { proto2_rust_map_free(m) }
             }
 
             #[inline]
-            unsafe fn clear(m: RawMap, prototype: MapValue) {
-                unsafe { [< proto2_rust_map_clear_ $key >](m, prototype) }
+            unsafe fn clear(m: RawMap) {
+                unsafe { proto2_rust_map_clear(m) }
             }
 
             #[inline]
@@ -1126,13 +1126,13 @@ where
 
     unsafe fn map_free(_private: Private, map: &mut Map<Key, Self>) {
         unsafe {
-            Key::free(map.as_raw(Private), Self::get_prototype());
+            Key::free(map.as_raw(Private));
         }
     }
 
     fn map_clear(mut map: MapMut<Key, Self>) {
         unsafe {
-            Key::clear(map.as_raw(Private), Self::get_prototype());
+            Key::clear(map.as_raw(Private));
         }
     }
 
@@ -1260,6 +1260,8 @@ extern "C" {
     fn proto2_rust_thunk_UntypedMapIterator_increment(iter: &mut UntypedMapIterator);
 
     pub fn proto2_rust_map_new(key_prototype: MapValue, value_prototype: MapValue) -> RawMap;
+    pub fn proto2_rust_map_free(m: RawMap);
+    pub fn proto2_rust_map_clear(m: RawMap);
     pub fn proto2_rust_map_size(m: RawMap) -> usize;
     pub fn proto2_rust_map_iter(m: RawMap) -> UntypedMapIterator;
 }
